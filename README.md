@@ -20,6 +20,15 @@ flowchart LR
 5. [Toshiba-style requirement/config workflow](docs/05_requirement_to_config.md)
 6. [Testing, NRC và debugging](docs/06_testing_debugging.md)
 7. [Lab requirement và traceability](docs/07_lab_requirement.md)
+8. [DEM deep dive](docs/08_dem_deep_dive.md)
+9. [OBD fundamentals](docs/09_obd_fundamentals.md)
+10. [Automotive Ethernet và DoIP](docs/10_doip_ethernet.md)
+11. [DCM configuration deep dive](docs/11_dcm_configuration_deep_dive.md)
+12. [CANoe, ODX/PDX và test workflow](docs/12_tools_odx_canoe.md)
+
+## Nguồn tham khảo
+
+Curriculum được rà gap bằng [Udemy AUTOSAR Diagnostics course](https://www.udemy.com/course/autosar-diagnostics-dem-dcm-obd-uds/) từ phần mô tả công khai. Nội dung kỹ thuật trong repo được viết độc lập và đối chiếu AUTOSAR DCM/DEM/DoIP specifications; không sao chép bài giảng trả phí.
 
 ## Lab services
 

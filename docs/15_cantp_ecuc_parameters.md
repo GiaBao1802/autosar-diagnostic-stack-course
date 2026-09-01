@@ -1,59 +1,117 @@
-# CanTp ECUC parameters — channel, NSdu, addressing và timers
+# CanTp ECUC parameters — ISO-TP channel, NSdu và timers
 
-## RxNSdu
+Snapshot Toshiba có 6 half-duplex channel: 3 physical TxNSdu và 6 RxNSdu (physical + functional cho OBD/off-board/on-board). Diagnostic payload dùng 8 byte, Normal Fixed Addressing và padding `0xCC`.
 
-| Concept | Ý nghĩa |
-|---|---|
-| RxNSdu/Pdu references | map CanIf RX frame và upper PduR N-SDU |
-| Addressing format | normal, extended, mixed variants theo network design |
-| Target address type | physical/functional |
-| `N_Ar` | receiver chờ confirmation FC transmit |
-| `N_Br` | thời gian receiver chuẩn bị/trả FC/data buffer |
-| `N_Cr` | receiver chờ CF kế tiếp |
-| `BS` | số CF được phép trước FC tiếp |
-| `STmin` | receiver yêu cầu sender giữ gap CF |
-| `WFTmax` | số FC Wait tối đa |
-| Padding activation/byte | DLC/padding validation/generation policy |
+## 1. Hierarchy
 
-## TxNSdu
+```text
+CanTpConfig
+ └─ CanTpChannel
+     ├─ CanTpRxNSdu
+     │   ├─ RxNPdu       data SF/FF/CF từ CanIf
+     │   └─ TxFcNPdu     FC từ ECU về tester
+     └─ CanTpTxNSdu
+         ├─ TxNPdu       data SF/FF/CF từ ECU
+         └─ RxFcNPdu     FC từ tester về ECU
+```
 
-| Concept | Ý nghĩa |
-|---|---|
-| TxNSdu/Pdu refs | upper transmit request tới CanIf TX L-PDU |
-| `N_As` | sender chờ frame TxConfirmation |
-| `N_Bs` | sender chờ FC sau FF/block |
-| `N_Cs` | sender chuẩn bị CF tiếp/upper CopyTxData |
-| Padding | pad SF/FF/CF/FC theo config |
-| Addressing/TA | header/address byte interpretation |
+`NSdu` là message transport-level nối với PduR/DCM. `NPdu` là CAN-frame-level PDU nối với CanIf. Đổi direction sai khiến request có thể vào được nhưng response multi-frame không chạy.
+
+## 2. General parameters
+
+| Parameter | Snapshot | Tác động runtime |
+|---|---:|---|
+| `CanTpPaddingActive` | true | Bật padding policy toàn module. |
+| `CanTpHavePaddingByte` | true | Generate configurable padding byte. |
+| `CanTpPaddingByte` | `204 = 0xCC` | Byte điền phần dư của CAN frame. |
+| `CanTpFlexibleDataRateSupport` | false | Transport hiện không dùng CAN FD payload. |
+| `CanTpSupportNormalFixedAddressing` | true | Format đang dùng cho các NSdu. |
+| Standard addressing support | true | Binary có support nhưng NSdu hiện tại chọn Normal Fixed. |
+| Mixed11/Mixed29/Extended/Custom | false | Không generate handling cho các format này. |
+| `CanTpEnableSplitMainFunction` | true | Vendor cho phép tách Rx/Tx cyclic processing. |
+| `CanTpEnableConstantBS` | true | Receiver dùng BS theo cấu hình ổn định. |
+| `CanTpUseOnlyFirstFc` | true | Tx sử dụng thông tin FC đầu tiên theo vendor behavior. |
+| `CanTpEnableTransmitQueue` | false | Không có queue Tx bổ sung trong CanTp. |
+| `CanTpRxWftMax` | 0 | Receiver không phát FC.WAIT. |
+
+Tên CAN network có chữ CANFD nhưng `RxDl=8`, `TxDl=8`, FD support false. Phải đọc parameter, không suy luận từ tên bus.
+
+## 3. Channel
+
+`CanTpChannelMode=CANTP_MODE_HALF_DUPLEX`: một channel không thực hiện Rx và Tx data transfer đồng thời. Điều này tiết kiệm resource nhưng ảnh hưởng concurrency. Full duplex chỉ nên dùng khi requirement và buffer/state machine support.
+
+`CanTpChannelLowerLayer=CANTP_LOWER_LAYER_CANIF`: các NPdu đi qua CanIf. Reference xuống CanIf quyết định CAN ID/HRH/HTH thực tế.
+
+## 4. RxNSdu — ECU nhận diagnostic request
+
+| Parameter | Snapshot | Ý nghĩa |
+|---|---:|---|
+| `CanTpRxNSduId` | 0…5 | Handle nội bộ do PduR/CanTp dùng; không phải CAN ID. |
+| `CanTpRxAddressingFormat` | `NORMALFIXED` | Target/source address được suy từ network addressing/CAN ID mapping. |
+| `CanTpRxTaType` | physical/functional | Ảnh hưởng rule response và multi-frame functional handling. |
+| `CanTpRxDl` | 8 | CAN payload length dùng cho transport. |
+| `CanTpRxPaddingActivation` | ON | Validate/expect padding theo configuration. |
+| `CanTpBs` | 0 | FC.CTS cho sender gửi toàn bộ CF còn lại không cần FC tiếp. |
+| `CanTpSTmin` | 0 | ECU không yêu cầu gap bổ sung giữa CF từ tester. |
+| `CanTpRxWftMax` | 0 | Không sử dụng FC.WAIT. |
+| `CanTpNbr` | 0.9 s | Receiver phải chuẩn bị buffer/FC trong giới hạn. |
+| `CanTpNcr` | 1.4 s | Sau FC/CF, receiver chờ CF kế tiếp. |
+| `CanTpNar` | 1.4 s | Chờ confirmation khi ECU phát FC. |
+
+`BS=0` không nghĩa chỉ gửi zero CF; nó nghĩa “không giới hạn block cho phần còn lại”. End-of-message được xác định từ total length trong FF và số byte đã nhận, không từ một SN đặc biệt.
+
+## 5. TxNSdu — ECU gửi diagnostic response
+
+| Parameter | Snapshot | Ý nghĩa |
+|---|---:|---|
+| `CanTpTxNSduId` | 0…2 | Handle nội bộ cho ba physical response path. |
+| `CanTpTxAddressingFormat` | `NORMALFIXED` | Cách tạo/giải nghĩa addressing. |
+| `CanTpTxTaType` | physical | Response đi về một tester cụ thể. |
+| `CanTpTxDl` | 8 | SF/FF/CF dùng payload 8 byte. |
+| `CanTpTxPaddingActivation` | ON | Pad frame bằng `0xCC`. |
+| `CanTpNas` | 1.4 s | Chờ CanIf TxConfirmation cho frame data. |
+| `CanTpNbs` | 1.4 s | Sau FF hoặc hết block, chờ FC từ tester. |
+| `CanTpNcs` | 0.15 s | Chuẩn bị/cung cấp CF tiếp theo đúng hạn. |
+| `CanTpTc` | true | Vendor feature/optimization cho transmission confirmation path. |
+
+## 6. Timer flow
 
 ```mermaid
 sequenceDiagram
-  participant S as Sender CanTp
-  participant R as Receiver CanTp
+  participant D as DCM/PduR
+  participant S as ECU CanTp sender
+  participant R as Tester receiver
+  D->>S: Transmit N-SDU
   S->>R: FF
   Note over S: start N_Bs
   R-->>S: FC CTS(BS, STmin)
   Note over S: stop N_Bs
-  loop up to BS
-    S->>R: CF
-    Note over R: restart N_Cr
+  loop until total length reached
+    S->>R: CF(SN)
+    Note over S: N_As/N_Cs supervision
   end
+  S-->>D: TxConfirmation(E_OK)
 ```
 
-Timer config thường ở seconds trong ECUC float, trong khi main function chạy discrete period. Giá trị phải lớn hơn scheduling/CanIf latency với margin; quá nhỏ tạo intermittent timeout, quá lớn làm tester chờ lâu khi lỗi.
+Timer được kiểm tra theo tick main function. Nếu config 2 ms nhưng OS gọi 10 ms, effective timeout/spacing bị lượng tử hóa sai. Timer phải lớn hơn worst-case scheduling + CanIf/controller latency + margin.
 
-## MainFunctionPeriod
+## 7. Padding
 
-CanTp time base phụ thuộc cyclic call. ECUC period phải khớp SchM/OS scheduling thực. Config 5 ms nhưng task chạy 10 ms làm timer/spacing behavior sai.
+CanTp tạo padding ở Tx và loại bỏ phần padding khi giao N-SDU lên PduR. Receiver dựa PCI/total length, không tìm byte `0xCC` để đoán điểm kết thúc. Nếu ECU bật Rx padding validation nhưng tester gửi DLC/byte padding không đúng policy, CanTp có thể abort trước DCM.
 
-## Addressing
+Padding không chỉ dành cho CAN FD. Classic CAN diagnostic cũng thường pad frame tới 8 byte theo network/OEM/ISO profile. CAN FD chỉ thêm các payload length hợp lệ lớn hơn 8.
 
-Normal addressing dùng CAN ID để phân biệt endpoint. Extended/mixed thêm address byte trong payload, làm giảm payload mỗi frame. Physical/functional request thường dùng RxPdu khác; functional multi-frame có restriction theo protocol/OEM.
+## 8. Failure mapping
 
-## Padding
+| Lỗi | Module phát hiện | Kết quả |
+|---|---|---|
+| Wrong CF sequence number | CanTp | Abort reception; DCM không nhận request hoàn chỉnh. |
+| N_Cr timeout | CanTp | Abort Rx N-SDU. |
+| N_Bs timeout | CanTp | Abort Tx response vì tester không gửi FC. |
+| Buffer overflow từ PduR/DCM | CanTp/PduR | Abort với buffer request failure. |
+| Padding/length violation | CanTp | Reject/abort theo config. |
+| Unsupported SID | DCM | UDS NRC, vì transport đã hoàn tất. |
 
-TX pad đến configured DLC bằng padding byte; RX có thể kiểm tra length/padding rule. Padding không phải application data và không được chuyển vào DCM total N-SDU. CanTp biết total length từ PCI, nên bỏ phần ngoài length theo transport framing—not scan giá trị byte.
+## 9. Review checklist
 
-## Configuration review
-
-CAN ID/CanIf PDU → CanTp Rx/Tx NSdu → PduR source/destination → DCM Rx/Tx connection phải tạo chuỗi ID nhất quán. Review cả direction và confirmation callback; một route RX đúng không bảo đảm TX response đúng.
+Trace đủ hai chiều: `CanIf RxNPdu → CanTp RxNSdu → PduR → DCM` và `DCM → PduR → CanTp TxNSdu → CanIf TxNPdu`. Test SF, FF/FC/CF, BS=0, STmin, wrong SN, missing FC, missing CF, padding, boundary buffer và confirmation failure.

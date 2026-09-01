@@ -33,6 +33,7 @@ flowchart LR
 16. [DEM ECUC parameters](docs/16_dem_ecuc_parameters.md)
 17. [VIN, variant, reset và DTC use cases](docs/17_real_uds_use_cases.md)
 18. [Configuration walkthrough](docs/18_configuration_walkthrough.md)
+19. [PduR ECUC parameters](docs/19_pdur_ecuc_parameters.md)
 
 ## Nguồn tham khảo
 

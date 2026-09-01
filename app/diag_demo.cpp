@@ -12,6 +12,9 @@ static void print(const diag::Bytes& bytes)
 int main()
 {
     diag::Server ecu;
+    const auto vin = ecu.process({0x22u, 0xF1u, 0x90u});
+    print(vin);
+    for (const auto& frame : diag::segment(vin)) print(frame);
     print(ecu.process({0x10u, 0x03u}));
     print(ecu.process({0x27u, 0x01u}));
     print(ecu.process({0x27u, 0x02u, 0xFFu, 0x66u}));
@@ -19,4 +22,6 @@ int main()
     ecu.main_function();
     ecu.simulated_reset();
     print(ecu.process({0x22u, 0xF1u, 0xA0u}));
+    print(ecu.process({0x11u, 0x01u}));
+    ecu.main_function();
 }

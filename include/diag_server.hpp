@@ -17,6 +17,7 @@ public:
 private:
     Bytes negative(std::uint8_t sid, std::uint8_t nrc) const;
     Bytes session_control(const Bytes& request);
+    Bytes ecu_reset(const Bytes& request);
     Bytes security_access(const Bytes& request);
     Bytes read_did(const Bytes& request) const;
     Bytes write_did(const Bytes& request);
@@ -26,6 +27,7 @@ private:
     bool seed_requested_{};
     bool coding_valid_{};
     bool nvm_pending_{};
+    bool reset_pending_{};
     std::array<std::uint8_t, 3> runtime_{};
     std::array<std::uint8_t, 3> nvm_{};
 };

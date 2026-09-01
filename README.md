@@ -27,6 +27,12 @@ flowchart LR
 10. [Automotive Ethernet và DoIP](docs/10_doip_ethernet.md)
 11. [DCM configuration deep dive](docs/11_dcm_configuration_deep_dive.md)
 12. [CANoe, ODX/PDX và test workflow](docs/12_tools_odx_canoe.md)
+13. [AUTOSAR diagnostic API reference](docs/13_autosar_api_reference.md)
+14. [DCM ECUC parameters](docs/14_dcm_ecuc_parameters.md)
+15. [CanTp ECUC parameters](docs/15_cantp_ecuc_parameters.md)
+16. [DEM ECUC parameters](docs/16_dem_ecuc_parameters.md)
+17. [VIN, variant, reset và DTC use cases](docs/17_real_uds_use_cases.md)
+18. [Configuration walkthrough](docs/18_configuration_walkthrough.md)
 
 ## Nguồn tham khảo
 
@@ -35,12 +41,14 @@ Curriculum được rà gap bằng [Udemy AUTOSAR Diagnostics course](https://ww
 ## Lab services
 
 - `0x10` DiagnosticSessionControl
+- `0x11` ECUReset (Hard Reset)
 - `0x22` ReadDataByIdentifier
 - `0x2E` WriteDataByIdentifier
 - `0x27` SecurityAccess với seed/key học tập
 - `0x31` RoutineControl
 - `0x3E` TesterPresent
 - ISO-TP SF/FF/CF/FC segmentation/reassembly model
+- DID `0xF190` VIN response 17 ASCII bytes, tự động thành multi-frame trên Classic CAN
 
 Toy security algorithm không được dùng trong sản phẩm thật.
 

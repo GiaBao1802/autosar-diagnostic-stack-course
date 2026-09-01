@@ -1,5 +1,7 @@
 # AUTOSAR Diagnostic Stack — Theory, Configuration and Practice
 
+[![Build and test](https://github.com/GiaBao1802/autosar-diagnostic-stack-course/actions/workflows/build.yml/badge.svg)](https://github.com/GiaBao1802/autosar-diagnostic-stack-course/actions/workflows/build.yml)
+
 Khóa học từ CAN frame tới UDS service và application callback, kèm lab DCM/ISO-TP độc lập. Case study dựa trên **workflow** quan sát trong workspace Toshiba MICROSAR, nhưng không sao chép requirement, identifier, generated code hay source thương mại.
 
 ```mermaid
@@ -41,3 +43,12 @@ Curriculum được rà gap bằng [Udemy AUTOSAR Diagnostics course](https://ww
 - ISO-TP SF/FF/CF/FC segmentation/reassembly model
 
 Toy security algorithm không được dùng trong sản phẩm thật.
+
+## Build và chạy lab
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+./build/diag_demo
+```

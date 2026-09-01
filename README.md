@@ -15,25 +15,24 @@ flowchart LR
 
 ## Nội dung
 
-1. [UDS protocol và services](docs/01_uds_protocol.md)
-2. [DCM DSL–DSD–DSP](docs/02_dcm_architecture.md)
-3. [CanTp/ISO-TP và timers](docs/03_cantp_isotp.md)
-4. [End-to-end RX/TX flow](docs/04_full_stack_flow.md)
-5. [Toshiba-style requirement/config workflow](docs/05_requirement_to_config.md)
-6. [Testing, NRC và debugging](docs/06_testing_debugging.md)
-7. [Lab requirement và traceability](docs/07_lab_requirement.md)
-8. [DEM deep dive](docs/08_dem_deep_dive.md)
+### Phần I — Protocol và AUTOSAR stack
+
+1. [UDS protocol và diagnostic services](docs/01_uds_protocol.md)
+2. [DCM: architecture, ECUC parameters và Toshiba snapshot](docs/02_dcm_configuration.md)
+3. [Transport stack: CanIf, CanTp, PduR và RX/TX flow](docs/03_transport_stack.md)
+4. [DEM: event, DTC, debounce, memory và NvM](docs/04_dem_configuration.md)
+5. [AUTOSAR diagnostic API reference](docs/05_autosar_api_reference.md)
+
+### Phần II — Thực hành và verification
+
+6. [UDS use cases: VIN, variant, reset, DTC và routine](docs/06_real_uds_use_cases.md)
+7. [Requirement → configuration → generated artifacts và lab](docs/07_requirement_to_config_lab.md)
+8. [Testing, CANoe/ODX, SIL/HIL và debugging](docs/08_testing_tools_debugging.md)
+
+### Phần III — Protocol mở rộng
+
 9. [OBD fundamentals](docs/09_obd_fundamentals.md)
 10. [Automotive Ethernet và DoIP](docs/10_doip_ethernet.md)
-11. [DCM configuration deep dive](docs/11_dcm_configuration_deep_dive.md)
-12. [CANoe, ODX/PDX và test workflow](docs/12_tools_odx_canoe.md)
-13. [AUTOSAR diagnostic API reference](docs/13_autosar_api_reference.md)
-14. [DCM ECUC parameters](docs/14_dcm_ecuc_parameters.md)
-15. [CanTp ECUC parameters](docs/15_cantp_ecuc_parameters.md)
-16. [DEM ECUC parameters](docs/16_dem_ecuc_parameters.md)
-17. [VIN, variant, reset và DTC use cases](docs/17_real_uds_use_cases.md)
-18. [Configuration walkthrough](docs/18_configuration_walkthrough.md)
-19. [PduR ECUC parameters](docs/19_pdur_ecuc_parameters.md)
 
 ## Nguồn tham khảo
 

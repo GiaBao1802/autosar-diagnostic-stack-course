@@ -19,6 +19,21 @@ flowchart LR
 
 Một event là lỗi do một monitor báo. DTC là mã external mà tester đọc. Khi event combination bật, nhiều event có thể liên quan cùng DTC; vì vậy không giả định one-event-one-DTC.
 
+### UDS DTC status byte
+
+| Bit | Tên rút gọn | Ý nghĩa chính |
+|---:|---|---|
+| 0 | TF | Test failed hiện tại. |
+| 1 | TFTOC | Đã failed trong operation cycle hiện tại. |
+| 2 | PDTC | Pending DTC. |
+| 3 | CDTC | Confirmed DTC. |
+| 4 | TNCSLC | Test chưa hoàn tất kể từ lần clear cuối. |
+| 5 | TFSLC | Đã failed kể từ lần clear cuối. |
+| 6 | TNCTOC | Test chưa hoàn tất trong cycle hiện tại. |
+| 7 | WIR | Warning indicator requested. |
+
+Status byte là state machine qua monitor result và operation cycle, không chỉ là phép copy FAILED thành một byte cố định.
+
 ## 2. DemGeneral snapshot
 
 | Parameter | Giá trị | Runtime behavior |
@@ -75,6 +90,8 @@ So sánh:
 | Monitor internal | Monitor | Monitor tự debounce và thường report FAILED/PASSED. |
 
 FAILED/PASSED là qualified result. PREFAILED/PREPASSED chỉ là input cho debounce algorithm được cấu hình; nếu algorithm đó không active, không được kỳ vọng DEM tự debounce.
+
+Confirmation, healing và aging là ba cơ chế khác nhau: confirmation quyết định confirmed DTC; healing tắt indicator sau các cycle tốt; aging xóa/giảm trạng thái lịch sử sau đủ aging cycle. Một DTC có thể hết MIL nhưng chưa aged khỏi memory.
 
 ## 5. Operation cycle
 

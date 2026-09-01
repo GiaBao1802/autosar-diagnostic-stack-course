@@ -1,8 +1,19 @@
-# CanTp ECUC parameters — ISO-TP channel, NSdu và timers
+# Diagnostic transport stack — CanIf, CanTp, PduR và RX/TX flow
 
 Snapshot Toshiba có 6 half-duplex channel: 3 physical TxNSdu và 6 RxNSdu (physical + functional cho OBD/off-board/on-board). Diagnostic payload dùng 8 byte, Normal Fixed Addressing và padding `0xCC`.
 
-## 1. Hierarchy
+## 1. ISO-TP frame types
+
+| Frame | PCI nibble | Vai trò |
+|---|---:|---|
+| Single Frame (SF) | `0x0` | Chứa toàn bộ N-SDU ngắn trong một CAN frame. |
+| First Frame (FF) | `0x1` | Mở multi-frame và công bố total message length. |
+| Consecutive Frame (CF) | `0x2` | Mang phần data tiếp theo cùng sequence number 0…15 quay vòng. |
+| Flow Control (FC) | `0x3` | Receiver trả CTS/WAIT/OVERFLOW cùng BS và STmin. |
+
+FF/CF/FC là transport frame, không phải UDS request riêng. Kết thúc reception dựa total length và số byte đã copy, không dựa “SN cuối”.
+
+## 2. Hierarchy
 
 ```text
 CanTpConfig
@@ -17,7 +28,7 @@ CanTpConfig
 
 `NSdu` là message transport-level nối với PduR/DCM. `NPdu` là CAN-frame-level PDU nối với CanIf. Đổi direction sai khiến request có thể vào được nhưng response multi-frame không chạy.
 
-## 2. General parameters
+## 3. General parameters
 
 | Parameter | Snapshot | Tác động runtime |
 |---|---:|---|
@@ -36,13 +47,13 @@ CanTpConfig
 
 Tên CAN network có chữ CANFD nhưng `RxDl=8`, `TxDl=8`, FD support false. Phải đọc parameter, không suy luận từ tên bus.
 
-## 3. Channel
+## 4. Channel
 
 `CanTpChannelMode=CANTP_MODE_HALF_DUPLEX`: một channel không thực hiện Rx và Tx data transfer đồng thời. Điều này tiết kiệm resource nhưng ảnh hưởng concurrency. Full duplex chỉ nên dùng khi requirement và buffer/state machine support.
 
 `CanTpChannelLowerLayer=CANTP_LOWER_LAYER_CANIF`: các NPdu đi qua CanIf. Reference xuống CanIf quyết định CAN ID/HRH/HTH thực tế.
 
-## 4. RxNSdu — ECU nhận diagnostic request
+## 5. RxNSdu — ECU nhận diagnostic request
 
 | Parameter | Snapshot | Ý nghĩa |
 |---|---:|---|
@@ -60,7 +71,7 @@ Tên CAN network có chữ CANFD nhưng `RxDl=8`, `TxDl=8`, FD support false. Ph
 
 `BS=0` không nghĩa chỉ gửi zero CF; nó nghĩa “không giới hạn block cho phần còn lại”. End-of-message được xác định từ total length trong FF và số byte đã nhận, không từ một SN đặc biệt.
 
-## 5. TxNSdu — ECU gửi diagnostic response
+## 6. TxNSdu — ECU gửi diagnostic response
 
 | Parameter | Snapshot | Ý nghĩa |
 |---|---:|---|
@@ -74,7 +85,7 @@ Tên CAN network có chữ CANFD nhưng `RxDl=8`, `TxDl=8`, FD support false. Ph
 | `CanTpNcs` | 0.15 s | Chuẩn bị/cung cấp CF tiếp theo đúng hạn. |
 | `CanTpTc` | true | Vendor feature/optimization cho transmission confirmation path. |
 
-## 6. Timer flow
+## 7. Timer flow
 
 ```mermaid
 sequenceDiagram
@@ -95,13 +106,13 @@ sequenceDiagram
 
 Timer được kiểm tra theo tick main function. Nếu config 2 ms nhưng OS gọi 10 ms, effective timeout/spacing bị lượng tử hóa sai. Timer phải lớn hơn worst-case scheduling + CanIf/controller latency + margin.
 
-## 7. Padding
+## 8. Padding
 
 CanTp tạo padding ở Tx và loại bỏ phần padding khi giao N-SDU lên PduR. Receiver dựa PCI/total length, không tìm byte `0xCC` để đoán điểm kết thúc. Nếu ECU bật Rx padding validation nhưng tester gửi DLC/byte padding không đúng policy, CanTp có thể abort trước DCM.
 
 Padding không chỉ dành cho CAN FD. Classic CAN diagnostic cũng thường pad frame tới 8 byte theo network/OEM/ISO profile. CAN FD chỉ thêm các payload length hợp lệ lớn hơn 8.
 
-## 8. Failure mapping
+## 9. Failure mapping
 
 | Lỗi | Module phát hiện | Kết quả |
 |---|---|---|
@@ -112,6 +123,51 @@ Padding không chỉ dành cho CAN FD. Classic CAN diagnostic cũng thường pa
 | Padding/length violation | CanTp | Reject/abort theo config. |
 | Unsupported SID | DCM | UDS NRC, vì transport đã hoàn tất. |
 
-## 9. Review checklist
+## 10. Review checklist
 
 Trace đủ hai chiều: `CanIf RxNPdu → CanTp RxNSdu → PduR → DCM` và `DCM → PduR → CanTp TxNSdu → CanIf TxNPdu`. Test SF, FF/FC/CF, BS=0, STmin, wrong SN, missing FC, missing CF, padding, boundary buffer và confirmation failure.
+
+## 11. PduR trong diagnostic path
+
+PduR không hiểu SID, DID, NRC hay ISO-TP PCI. Nó nối API và PDU reference giữa CanTp và DCM.
+
+```mermaid
+flowchart LR
+  CANIF_RX["CanIf Rx NPdu"] --> CANTP_RX["CanTp RxNSdu"] --> PR_RX["PduR Rx route"] --> DCM_RX["Dcm RxPdu"]
+  DCM_TX["Dcm TxPdu"] --> PR_TX["PduR Tx route"] --> CANTP_TX["CanTp TxNSdu"] --> CANIF_TX["CanIf Tx NPdu"]
+```
+
+| PduR parameter | Snapshot | Ý nghĩa |
+|---|---:|---|
+| `PduRSourcePduHandleId` | generated index | Tra route; không phải CAN ID hoặc CanTp NSduId. |
+| `PduRSrcPduDirection` | RX/TX | Hướng của PDU tại source module. |
+| `PduRSrcPduRef` | EcuC PDU ref | Nối đúng source PDU instance. |
+| Source BSW module ref | CanTp/DCM | Chọn generated adapter API. |
+| `PduRDestPduHandleId` | generated index | Index destination table. |
+| `PduRDestPduRoutingType` | `API_FORWARDING` | Forward bằng API, không gateway-buffer processing. |
+| `PduRDestPduDataProcessing` | `IMMEDIATE` | Gọi destination path ngay. |
+| length strategy | `UNUSED` | Không dùng IF length adaptation. |
+| cross-partition destination | false | Không qua partition bridge. |
+
+Snapshot có 6 Rx route: functional + physical cho OBD, off-board và on-board; có 3 physical Tx response route. Functional request vẫn response bằng physical Tx path.
+
+Với TP message, PduR nối chuỗi API chứ không tự assemble message:
+
+```text
+RX: CanTp_StartOfReception → PduR → Dcm_StartOfReception
+    CanTp_CopyRxData       → PduR → Dcm_CopyRxData
+    CanTp_RxIndication     → PduR → Dcm_TpRxIndication
+
+TX: Dcm_Transmit           → PduR → CanTp_Transmit
+    CanTp_CopyTxData       → PduR → Dcm_CopyTxData
+    CanTp_TxConfirmation   → PduR → Dcm_TpTxConfirmation
+```
+
+## 12. Full RX/TX flow
+
+```text
+RX: CAN → CanIf → CanTp reassembly → PduR → DCM DSL → DSD → DSP
+TX: DSP → DSD/DSL → PduR → CanTp segmentation → CanIf → CAN
+```
+
+Nếu CAN trace không có frame thì bắt đầu ở CanIf/controller; có FF nhưng không có CF thì kiểm tra FC/N_Bs; đủ request nhưng không response thì trace PduR→DCM service table/access/callback.

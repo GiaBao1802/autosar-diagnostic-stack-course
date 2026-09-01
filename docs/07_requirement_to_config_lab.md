@@ -1,4 +1,4 @@
-# Toshiba-style workflow: requirement → coding/config → generated artifacts
+# Requirement → configuration → generated artifacts và lab
 
 Workspace cục bộ cho thấy workflow artifact điển hình:
 
@@ -52,3 +52,32 @@ Không sửa generated file để “add DID”. Sửa source configuration/mode
 ```
 
 Production security algorithm/key handling không được public hoặc thay bằng toy XOR.
+
+## Configuration walkthrough
+
+### Read DID/VIN-like data
+
+Tạo DID → DidInfo/access → DidSignal → Data; cấu hình size/type/endianness/read port; map callback; cho phép đúng session/security; kiểm tra SID `0x22`, buffer và CanTp/PduR multi-frame response path.
+
+### Write variant DID
+
+Định nghĩa coding layout/range → session/security/mode rule → condition check → write callback → RAM/NvM atomicity → apply ngay/routine/reset → read-back và power-cycle test.
+
+### Hard reset
+
+Enable SID/subfunction → access/condition → BswM/EcuM/Mcu reset preparation → NvM policy → chỉ reset sau positive response theo requirement.
+
+## Traceability và definition of done
+
+| Requirement | Design/config | Implementation | Test evidence |
+|---|---|---|---|
+| Read coding DID | DID/Data/read access | read callback | positive, wrong DID/session |
+| Write coding DID | write access/NvM | validate/write callback | range, security, persistence |
+| Apply coding | RID/start access | routine state machine | pending/result/reset |
+| Transport | CanIf/CanTp/PduR/DCM refs | generated config | SF/multi-frame/timeouts |
+
+Lab hoàn tất khi requirement có unique ID, mỗi rule có test, generated diff được review, callback có unit test, transport có negative test và coding sống qua power cycle.
+
+## Generated artifacts cần review
+
+`Dcm_Cfg/Lcfg/PBcfg`, `CanTp_*Cfg`, `PduR_*`, RTE/callback headers, NvM block config và SchM/OS cyclic schedule. Vendor có thể đổi tên file; review theo responsibility và symbolic reference, không học thuộc line number.

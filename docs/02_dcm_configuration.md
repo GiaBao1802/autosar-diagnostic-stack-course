@@ -2,6 +2,16 @@
 
 Bài này đọc cấu hình DCM theo đúng hierarchy AUTOSAR/MICROSAR. Snapshot thực tế được rút từ một project Toshiba: 3 diagnostic protocol row, task 2 ms, buffer 4095 byte, 3 session, 109 DID và 8 routine. Tên PDU nội bộ đã được rút gọn.
 
+DCM chia trách nhiệm thành ba phần logic:
+
+- **DSL** quản lý connection, protocol, Rx/Tx buffer, session, security và P2/P2*/S3.
+- **DSD** nhận request hoàn chỉnh, tìm SID/subfunction trong service table, authorize và dispatch.
+- **DSP** hiện thực service như DID, RID, DTC, reset và gọi callback/RTE/DEM.
+
+```text
+PduR → DSL(connection/timing) → DSD(service/access) → DSP(data/routine/DEM)
+```
+
 ## 1. Cách đọc một ECUC container
 
 ```xml
@@ -51,6 +61,8 @@ flowchart TD
 ### Buffer
 
 Ba client OBD, off-board UDS và on-board UDS đều có buffer `4095 byte`. Đây là kích thước **diagnostic N-SDU**, không phải CAN DLC. CanTp có thể ghép nhiều CAN frame thành request tối đa trong giới hạn buffer.
+
+Khi sizing, lấy request/response UDS lớn nhất kể cả SID, DID/RID, record header và payload; cộng margin/alignment theo vendor. Transport có thể support message dài nhưng DCM buffer nhỏ hơn vẫn làm reception fail.
 
 Buffer quá nhỏ dẫn đến `BUFREQ_E_OVFL`/reception abort trước khi DSD nhìn thấy SID. Buffer rất lớn làm tăng RAM và contention nếu implementation dùng shared buffer.
 

@@ -81,3 +81,48 @@ Lab hoàn tất khi requirement có unique ID, mỗi rule có test, generated di
 ## Generated artifacts cần review
 
 `Dcm_Cfg/Lcfg/PBcfg`, `CanTp_*Cfg`, `PduR_*`, RTE/callback headers, NvM block config và SchM/OS cyclic schedule. Vendor có thể đổi tên file; review theo responsibility và symbolic reference, không học thuộc line number.
+
+## Toshiba-derived requirement case study — sanitized
+
+### `DIAG-DTC-CYCLE-001`
+
+> ECU shall qualify a monitored fault, report the selected event to DEM, store environmental data when allocated in primary memory, expose it through UDS `0x19`, and retain permitted data across power cycle. A two-cycle fault shall not be confirmed using the normal one-cycle path.
+
+| Concern | Design | Artifact |
+|---|---|---|
+| Monitor input | failed/passed flags | application monitor interface |
+| Cycle policy | one/two-cycle event selection | event table + DCY |
+| Debounce owner | monitor internal | Dem debounce configuration |
+| External DTC | event→DTC mapping | EventParameter/DTCClass |
+| Snapshot | capture on storage | FreezeFrameClass/DID list |
+| Capacity | primary memory/displacement | DemPrimaryMemory/priority |
+| Persistence | DEM NvM blocks | NvM references |
+| Tester access | `19 02`, snapshot/extended | DCM table + DEM client |
+
+```c
+if (monitorFailed) {
+    selectedEvent = SelectEventForCyclePolicy(baseEvent, cycleState);
+    (void)Dem_SetEventStatus(selectedEvent, DEM_EVENT_STATUS_FAILED);
+} else if (monitorPassed) {
+    (void)Dem_SetEventStatus(baseEvent, DEM_EVENT_STATUS_PASSED);
+}
+```
+
+Generated code cung cấp symbolic ID, tables, memory layout và API wiring. Manual code chứa monitor/cycle selection; không sửa generated DEM tables.
+
+### Tests
+
+1. One-cycle fail tạo đúng TF/PDTC, entry và snapshot.
+2. Two-cycle fault fail một cycle chưa confirmed.
+3. Fail đủ cycle set CDTC theo attributes.
+4. Pass/healing tắt indicator nhưng không aging quá sớm.
+5. `19 02` status-mask filtering đúng.
+6. Snapshot trả capture-time data, không phải live sensor.
+7. `0x14` clear RAM/NvM theo policy.
+8. Power-cycle retention sau NvM completion.
+9. Memory-full displacement/fallback đúng priority.
+
+```text
+Requirement → monitor design → DEM ECUC/NvM refs → manual API call
+            → DCM 0x19/0x14 → component/SIL/HIL evidence
+```

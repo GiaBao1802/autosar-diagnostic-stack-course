@@ -460,3 +460,111 @@ Thu thập cùng timestamp: CAN trace, DCM service/session/security state, callb
 8. Lập trace table requirement → ECUC container → generated artifact → callback → test.
 
 Nguồn chuẩn để đọc sâu: [AUTOSAR DCM SWS R24-11](https://www.autosar.org/fileadmin/standards/R24-11/CP/AUTOSAR_CP_SWS_DiagnosticCommunicationManager.pdf), [AUTOSAR DEM SWS](https://www.autosar.org/fileadmin/standards/R20-11/CP/AUTOSAR_SWS_DiagnosticEventManager.pdf).
+
+## 10. Toshiba source case study — code đã sanitize
+
+Các đoạn dưới giữ cấu trúc logic quan sát trong source nhưng đổi tên identifier và bỏ customer comment. Mục tiêu là học boundary generated RTE → application → BSW API.
+
+### Read DID wrapper
+
+```c
+Std_ReturnType Rte_Call_DataServices_ReadData(
+    Dcm_OpStatusType opStatus,
+    uint8 *data)
+{
+    APP_UNUSED(opStatus);
+    (void)App_ReadDiagnosticData(data);
+    return E_OK;
+}
+```
+
+Source có nhiều wrapper cùng pattern: DCM gọi operation của `DcmDspData`; wrapper chuyển sang application function. Logic domain không nằm trong DCM. Configured size phải khớp số byte application ghi; trả `E_OK` vô điều kiện chỉ đúng khi data source không có failure/pending contract.
+
+```text
+22 <DID> → DSP/Data config → RTE wrapper → application read logic
+         → DCM response buffer → 62 <DID> <data>
+```
+
+### Write DID async và NvM
+
+```c
+Std_ReturnType App_WriteCoding(const uint8 *data,
+                               Dcm_OpStatusType opStatus,
+                               Dcm_NegativeResponseCodeType *nrc)
+{
+    if (opStatus == DCM_INITIAL) {
+        if (!Coding_IsValid(data)) {
+            *nrc = DCM_E_REQUESTOUTOFRANGE;
+            return E_NOT_OK;
+        }
+        memcpy(codingMirror, data, CODING_LENGTH);
+        if (NvM_WriteBlock(CODING_BLOCK, codingMirror) != E_OK) {
+            *nrc = DCM_E_GENERALPROGRAMMINGFAILURE;
+            return E_NOT_OK;
+        }
+        return DCM_E_PENDING;
+    }
+
+    if (opStatus == DCM_PENDING) {
+        NvM_RequestResultType result;
+        (void)NvM_GetErrorStatus(CODING_BLOCK, &result);
+        if (result == NVM_REQ_PENDING) return DCM_E_PENDING;
+        if (result == NVM_REQ_OK) return E_OK;
+        *nrc = DCM_E_GENERALPROGRAMMINGFAILURE;
+    }
+    return E_NOT_OK;
+}
+```
+
+Application sở hữu validation và persistence state; DCM sở hữu UDS timing/NRC `0x78`. Không trả positive ngay sau queue write nếu requirement đòi dữ liệu đã persist.
+
+### Application/failsafe báo DEM
+
+Pattern rút từ một module failsafe: application duyệt event table, chọn event theo driving-cycle policy rồi báo qualified result.
+
+```c
+for (index = 0U; index < EVENT_COUNT; index++) {
+    Dem_EventIdType eventId = eventTable[index].eventId;
+
+    if (eventTable[index].failedFlag == TRUE) {
+        if ((eventTable[index].confirmCycles == TWO_CYCLES) &&
+            (oneCycleEvaluation == TRUE)) {
+            eventId = eventTable[index].oneCycleEventId;
+        }
+        (void)Dem_SetEventStatus(eventId, DEM_EVENT_STATUS_FAILED);
+    }
+
+    if (eventTable[index].passedFlag == TRUE) {
+        (void)Dem_SetEventStatus(eventId, DEM_EVENT_STATUS_PASSED);
+    }
+}
+```
+
+Layer application/failsafe quyết định monitor result và event selection. DEM cập nhật status/cycle/memory/freeze frame/NvM; DCM chỉ expose kết quả qua `0x19`.
+
+### Routine async
+
+```c
+switch (opStatus) {
+case DCM_INITIAL:
+    if (!VehicleState_AllowsRoutine()) {
+        *nrc = DCM_E_CONDITIONSNOTCORRECT;
+        return E_NOT_OK;
+    }
+    Routine_StartJob();
+    return DCM_E_PENDING;
+case DCM_PENDING:
+    if (Routine_IsRunning()) return DCM_E_PENDING;
+    if (Routine_HasFailed()) {
+        *nrc = DCM_E_GENERALPROGRAMMINGFAILURE;
+        return E_NOT_OK;
+    }
+    out[0] = ROUTINE_RESULT_OK;
+    return E_OK;
+case DCM_CANCEL:
+    Routine_CancelJob();
+    return E_NOT_OK;
+}
+```
+
+Application chạy logic; DCM dispatch callback, quản lý pending/NRC/response và transport lifetime.

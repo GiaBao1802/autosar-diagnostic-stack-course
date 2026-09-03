@@ -413,7 +413,286 @@ Khi nhận requirement như “ECU shall support writing variant DID”, cần b
 10. Reset/apply/rollback/read-back behavior.
 11. Positive, negative, boundary, sequence và power-cycle tests.
 
-## 13. Câu hỏi tự kiểm tra
+## 13. Đọc UDS theo đúng ba phần ISO 14229
+
+Ba phần này không phải ba protocol độc lập. Chúng mô tả ba góc nhìn của cùng một cuộc hội thoại chẩn đoán:
+
+| Phần | Câu hỏi nó trả lời | Không nên nhầm với |
+|---|---|---|
+| ISO 14229-1 | Request/response có ý nghĩa gì, service có parameter nào, positive/NRC nào? | CAN ID, SF/FF/CF và AUTOSAR API. |
+| ISO 14229-2 | Client/server trao đổi theo session như thế nào, timing có ý nghĩa ở service boundary ra sao? | Task period của DCM hoặc timer N_xx của ISO-TP. |
+| ISO 14229-3 | Các yêu cầu chung được áp dụng cho UDS chạy trên CAN như thế nào? | Thuật toán segment chi tiết của ISO 15765-2. |
+
+```mermaid
+flowchart TD
+    A["ISO 14229-1<br/>SID, parameters, response, NRC"] --> B["ISO 14229-2<br/>session services and timing"]
+    B --> C["ISO 14229-3<br/>UDSonCAN requirements"]
+    C --> D["ISO 15765-2<br/>SF / FF / FC / CF"]
+    D --> E["AUTOSAR<br/>DCM - PduR - CanTp - CanIf"]
+```
+
+### 13.1 ISO 14229-1 — application layer
+
+Application layer làm việc với **diagnostic message hoàn chỉnh**. Ví dụ `22 F1 88` là một request dù ở dưới nó đi bằng một CAN frame hay nhiều frame. Với mỗi service phải tra đủ:
+
+1. request parameter record và chiều dài;
+2. positive response parameter record;
+3. supported addressing type;
+4. session/security/precondition;
+5. NRC áp dụng và điều kiện tạo NRC;
+6. effect của suppress-positive-response bit nếu service có subfunction;
+7. behavior khi operation chạy bất đồng bộ.
+
+Các service được gom theo mục đích:
+
+| Nhóm | SID tiêu biểu | Trách nhiệm |
+|---|---|---|
+| Diagnostic/communication management | `10`, `11`, `27`, `28`, `3E`, `83`, `84`, `85`, `86`, `87` | Session, reset, quyền truy cập, communication và diagnostic state. |
+| Data transmission | `22`, `23`, `24`, `2A`, `2C`, `2E`, `3D` | Đọc/ghi data theo DID hoặc memory. |
+| Stored data | `14`, `19` | Clear và đọc DTC/snapshot/extended data. |
+| Input/output control | `2F` | Tạm thời điều khiển một data object/I/O theo policy ECU. |
+| Routine | `31` | Start, stop hoặc lấy kết quả routine. |
+| Upload/download | `34`–`38` | Thiết lập, truyền và kết thúc data transfer. |
+
+Thứ tự validation không nên hard-code từ sơ đồ học tập. Một DCM thực tế dùng service processor và configuration để chọn NRC phù hợp. Hai lỗi cùng tồn tại không có nghĩa tester được quyền đoán NRC nào sẽ thắng; phải đối chiếu ISO edition, AUTOSAR/OEM rule và implementation.
+
+### 13.2 ISO 14229-2 — session layer và timing independence
+
+Ý chính của “timing independence” là semantics của service không phụ thuộc CAN, Ethernet hay transport cụ thể. Session layer nhìn thấy request/response data unit hoàn chỉnh và dùng service primitives mang ý nghĩa request, indication, response và confirmation; tên primitive cụ thể trong tài liệu chuẩn không đồng nghĩa trực tiếp với một hàm C duy nhất.
+
+```mermaid
+sequenceDiagram
+    participant T as Tester application
+    participant CT as Tester transport
+    participant ET as ECU transport
+    participant D as UDS server/DCM
+    T->>CT: Service request
+    CT->>ET: Network transfer (may be segmented)
+    ET->>D: Complete request indication
+    Note over D: P2 server processing window
+    alt completed within P2
+        D->>ET: Final response
+    else still processing
+        D->>ET: 7F SID 78
+        Note over T,D: Tester waits using P2*
+        D->>ET: Final response
+    end
+    ET->>CT: Network transfer
+    CT->>T: Response indication
+```
+
+Điểm cần nhớ:
+
+- P2/P2* đo behavior của diagnostic server sau khi nhận **đủ request**, không thay thế `N_Bs`, `N_Cr` của CanTp.
+- DCM main function 2 ms không có nghĩa P2 = 2 ms; task period chỉ là độ phân giải/lịch chạy của implementation.
+- S3 quản lý inactivity của non-default session. `3E` thường refresh S3 nhưng không mặc nhiên giữ security state qua mọi transition/reset.
+- `0x78` là response hợp lệ cho operation đang xử lý, không phải lời giải cho task bị treo. Server vẫn cần giới hạn số lần/khoảng cách response-pending theo cấu hình và OEM rule.
+
+Ví dụ cấu hình Toshiba đang học có DCM task `2 ms`, P2 server `50 ms` và P2* server `5 s`. Đây là ba đại lượng khác nhau: lịch polling, deadline response ban đầu và deadline sau response pending.
+
+### 13.3 ISO 14229-3 — UDS on CAN
+
+ISO 14229-3 áp dụng service/session UDS lên CAN và dựa vào network/transport profile của ISO 15765. Chuỗi AUTOSAR RX thực tế là:
+
+```text
+CAN frame
+  -> Can Driver / CanIf: nhận CAN ID, DLC, payload
+  -> CanTp: nhận SF hoặc ghép FF + CF; phát FC khi cần
+  -> PduR: route diagnostic N-SDU
+  -> DCM DSL: connection, protocol, buffer, timing
+  -> DCM DSD: dispatch SID theo service table
+  -> DCM DSP: DID/RID/service processing và application callback
+```
+
+Ví dụ classic CAN, normal addressing, request `22 F1 88` có thể nằm trong một SF:
+
+```text
+CAN data: 03 22 F1 88 00 00 00 00
+          |  |  \--- DID
+          |  \------ SID
+          \--------- SF PCI: payload length = 3
+```
+
+Nếu response của DID có 27 data bytes thì UDS response dài 30 bytes (`62 F1 88` + 27 bytes). Classic CAN không chứa vừa, nên CanTp segment:
+
+```text
+ECU -> Tester  FF: 10 1E 62 F1 88 D0 D1 D2
+Tester -> ECU  FC: 30 00 00 00 00 00 00 00
+ECU -> Tester  CF: 21 D3 D4 D5 D6 D7 D8 D9
+ECU -> Tester  CF: 22 DA DB DC DD DE DF E0
+ECU -> Tester  CF: 23 E1 E2 E3 E4 E5 E6 E7
+ECU -> Tester  CF: 24 E8 E9 EA 00 00 00 00
+```
+
+Trong ví dụ: `0x1E = 30` là total N-SDU length, `0x30` là FlowStatus=ContinueToSend, BS=`0` cho phép gửi phần còn lại không cần FC tiếp, STmin=`0`, còn nibble thấp của CF PCI là sequence number modulo 16. Byte padding không thuộc UDS payload và DCM không đọc/xóa padding; CanTp dùng length trong PCI để chỉ giao đúng N-SDU lên trên.
+
+Physical và functional request được phân biệt bởi connection/addressing configuration (CAN ID/target address), không phải một bit nằm trong SID. Functional request nhiều frame và response suppression phải tuân transport capability cùng OEM profile; không suy diễn rằng mọi service đều được broadcast và mọi ECU đều phải trả lời.
+
+## 14. Mapping vào AUTOSAR DCM
+
+### 14.1 DSL, DSD và DSP
+
+| Phần | Vai trò trong request `22 F1 88` |
+|---|---|
+| DSL | Nhận complete N-SDU, chọn protocol/connection/buffer, giữ session/security/timing và điều phối Tx. |
+| DSD | Đọc SID `0x22`, tìm service entry, kiểm tra/dispatch service và xây negative response chung. |
+| DSP | Parse DID `0xF188`, kiểm tra access/length, gọi configured data operation và format `62 F1 88 ...`. |
+
+Các boundary API thường thấy trong runtime RX/TX:
+
+```text
+CanIf_RxIndication
+ -> CanTp_StartOfReception / PduR_StartOfReception
+ -> PduR_CopyRxData (repeated for chunks)
+ -> PduR_TpRxIndication
+ -> DCM service processing
+ -> PduR_DcmTransmit
+ -> Dcm_CopyTxData (as CanTp requests chunks)
+ -> Dcm_TpTxConfirmation
+```
+
+Tên forwarding wrapper có thể khác theo generator, nhưng contract quan trọng là: StartOfReception xin buffer; CopyRxData chuyển chunk; TpRxIndication xác nhận toàn message thành công/thất bại. DCM không xử lý SID từ một FF chưa ghép xong.
+
+### 14.2 Sync và async callback
+
+| Dạng | Callback nhận gì | Khi nào dùng |
+|---|---|---|
+| Synchronous | data pointer, đôi khi error code | Data có sẵn và hoàn tất trong một lần gọi. |
+| Asynchronous | thêm `OpStatus` và NRC pointer | NvM/routine/hardware có thể cần nhiều DCM cycles. |
+| Variable length | thêm length pointer hoặc callback lấy length | Data length chỉ biết tại runtime. |
+
+Với async operation, lần đầu thường nhận initial state; nếu callback báo pending, DCM gọi lại bằng pending state. Khi timeout/cancel, callback có thể nhận cancel state. Tên enum và return contract phải đọc đúng AUTOSAR release/vendor header; không tự coi mọi `E_NOT_OK` là NRC `0x22`.
+
+## 15. Toshiba/MICROSAR implementation study
+
+> Phần này trích đoạn ngắn từ source trong workspace của người học để trace kiến trúc. Repository phải để private. Không tái phân phối toàn bộ vendor source, generated module hay customer data.
+
+### 15.1 Khởi tạo module
+
+Trong `BswM_Lcfg.c`, project khởi tạo các module liên quan theo chuỗi rút gọn sau:
+
+```c
+NvM_Init();
+NvM_ReadAll();
+CanIf_Init(NULL_PTR);
+CanTp_Init(NULL_PTR);
+PduR_Init(NULL_PTR);
+Com_Init(NULL_PTR);
+Dcm_Init(NULL_PTR);
+```
+
+Điểm học được không phải “mọi ECU bắt buộc có đúng thứ tự trên”, mà là dependencies phải sẵn sàng trước runtime communication. `Com` phục vụ signal communication; diagnostic request đi theo `CanTp -> PduR -> Dcm`, không đi qua AUTOSAR COM.
+
+### 15.2 DID mapping: generated table → RTE wrapper → application logic
+
+Generated `Dcm_Lcfg.c` map DID vào callback và chiều dài. Hai entry thực tế:
+
+```c
+{ ((Dcm_DidMgrOpFuncType)(Rte_Call_DataServices_DcmDspData_23FC_ReadData)),
+  1u, 1u, 0x0002u }
+{ ((Dcm_DidMgrOpFuncType)(Rte_Call_DataServices_DcmDspData_F188_ReadData)),
+  27u, 27u, 0x0001u }
+```
+
+Ý nghĩa có thể đọc chắc chắn từ context: DID `0x23FC` có read operation dài 1 byte; DID `0xF188` có read operation dài 27 bytes. Giá trị bit-field cuối là vendor-generated metadata, không nên đoán từng bit nếu chưa đối chiếu generated type/macro.
+
+RTE wrapper thực tế cho DID `0x23FC`:
+
+```c
+Std_ReturnType Rte_Call_DataServices_DcmDspData_23FC_ReadData(
+    Dcm_OpStatusType OpStatus, Dcm_MsgType Data)
+{
+    APP_UNUSED_PARAMETER(OpStatus);
+    (void)u1g_wdid23fc_read_pt(Data);
+    return (Std_ReturnType)E_OK;
+}
+```
+
+Flow là `DCM DSP -> generated function pointer -> RTE wrapper -> application-owned read function`. `Data` trỏ vào vùng DCM cung cấp để application ghi output. Wrapper bỏ `OpStatus`, vì implementation hiện tại hoàn tất đồng bộ; signature vẫn hỗ trợ model operation đã cấu hình.
+
+Write operation thể hiện rõ cơ chế async/error:
+
+```c
+Std_ReturnType Rte_Call_DataServices_DcmDspData_23FC_WriteData(
+    Dcm_MsgType Data,
+    Dcm_OpStatusType OpStatus,
+    Dcm_NegativeResponseCodeType* ErrorCode);
+```
+
+- `Data`: record sau DID trong request `2E 23 FC ...`.
+- `OpStatus`: initial/pending/cancel lifecycle do DCM quản lý.
+- `ErrorCode`: callback chọn NRC service-specific khi operation thất bại.
+- return value: báo complete, failed hoặc pending theo configured port/interface contract.
+
+### 15.3 Routine mapping
+
+Một routine typed callback trong project:
+
+```c
+Std_ReturnType Rte_Call_RoutineServices_DcmDspRoutine_110B_Start(
+    uint16 dataInForceDriveValue,
+    Dcm_OpStatusType OpStatus,
+    Dcm_NegativeResponseCodeType* ErrorCode);
+```
+
+Với request `31 01 11 0B xx xx`, DCM parse SID/subfunction/RID, decode hai byte option record thành `uint16`, rồi gọi callback. Application chỉ thực hiện semantics của routine; DCM chịu trách nhiệm protocol framing, access check, NRC envelope và positive response header.
+
+### 15.4 Những gì configuration cho biết
+
+Snapshot project đang học cho thấy:
+
+| Item | Giá trị quan sát được | Hệ quả khi test |
+|---|---:|---|
+| DCM main task | 2 ms | Service state machine được polling theo schedule này. |
+| P2 / P2* | 50 ms / 5 s | Tester phải chuyển sang P2* sau `7F SID 78`. |
+| DCM buffer | 4095 bytes | Giới hạn DCM khác với payload từng CAN frame. |
+| Sessions | `01`, `02`, `03` | Default, programming và extended được generate. |
+| CanTp link data length | 8 bytes | Đây là classic-CAN-sized transport setup trong snapshot. |
+| CanTp padding | enabled, `0xCC` | Padding được xử lý ở transport, không đưa vào DID data. |
+| Addressing | normal fixed | Address/connection do CanTp/DCM configuration ánh xạ. |
+
+Trong service table của snapshot FR không thấy SID `0x27`. Vì vậy không được học thuộc rằng ECU này luôn cần `27 01/02` trước write: security behavior phải trace theo đúng variant/config set. Một snapshot LCV khác có generated SecurityAccess callback, chứng minh feature thay đổi theo ECU variant.
+
+## 16. Ba flow end-to-end để tự debug
+
+### 16.1 Read DID `22 F1 88`
+
+```text
+Tester -> CanIf -> CanTp reassembly -> PduR -> DCM DSL/DSD/DSP
+  -> lookup F188, check session/security/read access
+  -> Rte_Call_...F188_ReadData(Data)
+  -> build 62 F1 88 + 27 bytes
+  -> PduR -> CanTp FF/FC/CF -> CanIf -> Tester
+```
+
+Nếu không thấy response: kiểm tra tuần tự CAN ID/DLC, CanTp Rx indication, PduR route, active DCM protocol, service table, DID table, access condition, callback return rồi mới kiểm tra Tx segmentation.
+
+### 16.2 Write variant `2E 23 FC xx`
+
+```text
+Request length/access valid?
+  -> call WriteData(Data, INITIAL, &nrc)
+  -> E_OK: 6E 23 FC
+  -> pending: DCM repeats callback and may send 7F 2E 78
+  -> failed: 7F 2E <nrc>
+```
+
+Test đầy đủ phải có positive write, read-back, wrong length, unsupported value, wrong session, locked security nếu configured, NvM failure, power cycle và behavior của network signal phụ thuộc variant.
+
+### 16.3 Start routine `31 01 11 0B xx xx`
+
+```text
+DCM parses option record -> uint16 input
+ -> routine callback starts work
+ -> immediate result: 71 01 11 0B ...
+ -> long work: 7F 31 78 then final 71...
+ -> invalid precondition: 7F 31 22
+ -> unsupported RID/value: 7F 31 31
+```
+
+Không nhầm `31 03` với “chạy lại”. Nó yêu cầu status/result của routine theo state machine đã được thiết kế; nếu chưa start, sequence error là một case cần test.
+
+## 17. Câu hỏi tự kiểm tra
 
 1. `0x22` có subfunction không? Nếu không, hai byte sau SID là gì?
 2. Vì sao `7F 22 31` khác `7F 22 33`?
@@ -422,12 +701,12 @@ Khi nhận requirement như “ECU shall support writing variant DID”, cần b
 5. CAN frame sequence number và TransferData blockSequenceCounter khác nhau thế nào?
 6. Tại sao một service được support vẫn có thể trả `0x7F` hoặc `0x33`?
 
-## 14. Tài liệu chuẩn để đối chiếu
+## 18. Tài liệu chuẩn để đối chiếu
 
-- ISO 14229-1 — UDS application layer và service definitions.
-- ISO 14229-2 — session layer services và timing independence.
-- ISO 14229-3 — UDS implementation on CAN.
+- [ISO 14229-1:2026](https://www.iso.org/standard/87962.html) — UDS application layer và service definitions.
+- [ISO 14229-2:2021](https://www.iso.org/standard/77322.html) — session layer services và transport independence.
+- [ISO 14229-3:2022](https://www.iso.org/standard/77323.html) — UDS implementation profile on CAN.
 - ISO 15765-2 — ISO-TP network/transport protocol on CAN.
-- AUTOSAR SWS Diagnostic Communication Manager — cách DCM hiện thực UDS trong AUTOSAR Classic.
+- [AUTOSAR CP SWS Diagnostic Communication Manager R24-11](https://www.autosar.org/fileadmin/standards/R24-11/CP/AUTOSAR_CP_SWS_DiagnosticCommunicationManager.pdf) — cách DCM hiện thực diagnostic services trong AUTOSAR Classic.
 
 ISO 14229-1:2026 là edition hiện hành tại thời điểm cập nhật bài; dự án thực tế có thể bị ràng buộc bởi edition cũ và OEM diagnostic specification. Không tự đổi behavior của ECU chỉ để theo edition mới nếu project baseline chưa thay đổi.
